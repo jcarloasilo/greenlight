@@ -9,6 +9,9 @@ func (app *application) routes() *chi.Mux {
 	mux := chi.NewRouter()
 	mux.Use(middleware.Logger)
 
+	mux.NotFound(app.notFoundResponse)
+	mux.MethodNotAllowed(app.methodNotAllowedResponse)
+
 	mux.Route("/v1", func(r chi.Router) {
 
 		r.Get("/healthcheck", app.healthcheckHandler)
