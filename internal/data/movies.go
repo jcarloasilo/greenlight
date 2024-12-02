@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/jcarloasilo/greenlight/internal/validator"
@@ -12,11 +13,11 @@ import (
 
 type Movie struct {
 	ID        int64     `json:"id"`
-	CreatedAt time.Time `json:"-"` // Use the - directive
+	CreatedAt time.Time `json:"-"`
 	Title     string    `json:"title"`
-	Year      int32     `json:"year,omitempty"`    // Add the omitempty directive
-	Runtime   Runtime   `json:"runtime,omitempty"` // Add the omitempty directive
-	Genres    []string  `json:"genres,omitempty"`  // Add the omitempty directive
+	Year      int32     `json:"year,omitempty"`
+	Runtime   Runtime   `json:"runtime,omitempty"`
+	Genres    []string  `json:"genres,omitempty"`
 	Version   int32     `json:"version"`
 }
 
@@ -65,8 +66,6 @@ func (m MovieModel) Get(id int64) (*Movie, error) {
 	var movie Movie
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	// Importantly, use defer to make sure that we cancel the context before the Get()
-	// method returns
 
 	defer cancel()
 
@@ -150,4 +149,53 @@ func (m MovieModel) Delete(id int64) error {
 		return ErrRecordNotFound
 	}
 	return nil
+}
+
+func (m MovieModel) GetAll(title string, genres []string, filters Filters) ([]*Movie, Metadata, error) {
+	query := fmt.Sprintf(`
+		SELECT count(*) OVER(), id, created_at, title, year, runtime, genres, version
+		FROM movies
+		WHERE (to_tsvector('simple', title) @@ plainto_tsquery('simple', $1) OR $1 = '')
+		AND (genres @> $2 OR $2 = '{}')
+		ORDER BY %s %s, id ASC
+		LIMIT $3 OFFSET $4`, filters.sortColumn(), filters.sortDirection())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	args := []interface{}{title, pq.Array(genres), filters.limit(), filters.offset()}
+
+	rows, err := m.DB.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, Metadata{}, err
+	}
+
+	defer rows.Close()
+
+	totalRecords := 0
+	movies := []*Movie{}
+	for rows.Next() {
+		var movie Movie
+		err := rows.Scan(
+			&totalRecords,
+			&movie.ID,
+			&movie.CreatedAt,
+			&movie.Title,
+			&movie.Year,
+			&movie.Runtime,
+			pq.Array(&movie.Genres),
+			&movie.Version,
+		)
+		if err != nil {
+			return nil, Metadata{}, err
+		}
+		movies = append(movies, &movie)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, Metadata{}, err
+	}
+
+	metadata := calculateMetadata(totalRecords, filters.Page, filters.PageSize)
+
+	return movies, metadata, nil
 }

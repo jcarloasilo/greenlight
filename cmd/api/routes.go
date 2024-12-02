@@ -16,6 +16,7 @@ func (app *application) routes() *chi.Mux {
 
 		r.Get("/healthcheck", app.healthcheckHandler)
 
+		r.Get("/movies", app.listMoviesHandler)
 		r.Post("/movies", app.createMovieHandler)
 		r.Get("/movies/{id}", app.showMovieHandler)
 		r.Patch("/movies/{id}", app.updateMovieHandler)
